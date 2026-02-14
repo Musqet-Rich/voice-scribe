@@ -102,13 +102,21 @@ final class AppState: ObservableObject {
 
     @MainActor
     func checkModelState() {
-        let modelDir = Self.baseDir
-            .appendingPathComponent("models")
-            .appendingPathComponent(selectedModel.rawValue)
-        if FileManager.default.fileExists(atPath: modelDir.path) {
-            modelState = .ready
-        } else {
-            modelState = .notDownloaded
+        let modelDir = Self.baseDir.appendingPathComponent("models")
+        // Try to load the model — WhisperKit knows its own directory structure
+        modelState = .downloading(progress: 0)
+        Task {
+            do {
+                try await transcriptionEngine.loadExistingModel(
+                    model: selectedModel,
+                    modelDir: modelDir
+                )
+                modelState = .ready
+                setupHotkeys()
+            } catch {
+                // Model not found or failed to load — show download view
+                modelState = .notDownloaded
+            }
         }
     }
 

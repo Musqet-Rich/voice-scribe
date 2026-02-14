@@ -47,6 +47,17 @@ final class TranscriptionEngine {
         return text
     }
 
+    /// Try to load an already-downloaded model (no download, just init)
+    func loadExistingModel(model: WhisperModel, modelDir: URL) async throws {
+        let config = WhisperKitConfig(
+            model: model.rawValue,
+            downloadBase: modelDir,
+            verbose: false,
+            prewarm: true
+        )
+        self.whisperKit = try await WhisperKit(config)
+    }
+
     /// Check if a model is loaded and ready
     var isReady: Bool {
         whisperKit != nil
