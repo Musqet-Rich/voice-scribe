@@ -28,6 +28,14 @@ struct DownloadView: View {
             .pickerStyle(.menu)
 
             switch appState.modelState {
+            case .checking:
+                VStack(spacing: 8) {
+                    ProgressView()
+                    Text("Loading model...")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
+
             case .notDownloaded:
                 Button("Download Model") {
                     Task { await appState.downloadModel() }

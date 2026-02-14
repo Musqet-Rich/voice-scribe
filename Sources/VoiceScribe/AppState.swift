@@ -3,6 +3,7 @@ import SwiftUI
 
 /// Model download state
 enum ModelState: Equatable {
+    case checking
     case notDownloaded
     case downloading(progress: Double)
     case ready
@@ -10,6 +11,7 @@ enum ModelState: Equatable {
 
     static func == (lhs: ModelState, rhs: ModelState) -> Bool {
         switch (lhs, rhs) {
+        case (.checking, .checking): return true
         case (.notDownloaded, .notDownloaded): return true
         case (.ready, .ready): return true
         case (.downloading(let a), .downloading(let b)): return a == b
@@ -104,7 +106,7 @@ final class AppState: ObservableObject {
     func checkModelState() {
         let modelDir = Self.baseDir.appendingPathComponent("models")
         // Try to load the model — WhisperKit knows its own directory structure
-        modelState = .downloading(progress: 0)
+        modelState = .checking
         Task {
             do {
                 try await transcriptionEngine.loadExistingModel(
