@@ -15,7 +15,7 @@ final class TranscriptionEngine {
 
         let config = WhisperKitConfig(
             model: model.rawValue,
-            downloadBase: modelDir.path,
+            downloadBase: modelDir,
             verbose: false,
             prewarm: true
         )

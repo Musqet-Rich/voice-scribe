@@ -186,6 +186,7 @@ final class AppState: ObservableObject {
         }
     }
 
+    @MainActor
     func toggleRecording() {
         if isRecording {
             stopRecording()
