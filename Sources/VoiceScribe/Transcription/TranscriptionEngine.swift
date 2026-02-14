@@ -56,18 +56,32 @@ final class TranscriptionEngine {
             .appendingPathComponent("whisperkit-coreml")
             .appendingPathComponent(model.rawValue)
 
+        print("[VoiceScribe] Looking for model at: \(modelFolder.path)")
+        print("[VoiceScribe] Exists: \(FileManager.default.fileExists(atPath: modelFolder.path))")
+
+        // List what's actually in the models dir for debugging
+        if let contents = try? FileManager.default.contentsOfDirectory(atPath: modelDir.path) {
+            print("[VoiceScribe] Contents of \(modelDir.path): \(contents)")
+        }
+        if let contents = try? FileManager.default.contentsOfDirectory(atPath: modelFolder.path) {
+            print("[VoiceScribe] Model folder contents: \(contents)")
+        }
+
         guard FileManager.default.fileExists(atPath: modelFolder.path) else {
+            print("[VoiceScribe] Model folder not found, falling back to notDownloaded")
             throw TranscriptionError.modelNotLoaded
         }
 
+        print("[VoiceScribe] Loading model from \(modelFolder.path)...")
         let config = WhisperKitConfig(
             modelFolder: modelFolder.path,
-            verbose: false,
+            verbose: true,
             prewarm: true,
             load: true,
             download: false
         )
         self.whisperKit = try await WhisperKit(config)
+        print("[VoiceScribe] Model loaded successfully!")
     }
 
     /// Check if a model is loaded and ready

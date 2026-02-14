@@ -117,6 +117,7 @@ final class AppState: ObservableObject {
                 setupHotkeys()
             } catch {
                 // Model not found or failed to load — show download view
+                print("[VoiceScribe] checkModelState failed: \(error)")
                 modelState = .notDownloaded
             }
         }
