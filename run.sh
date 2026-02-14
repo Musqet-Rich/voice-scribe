@@ -18,6 +18,13 @@ mkdir -p "$MACOS"
 cp .build/release/VoiceScribe "$MACOS/VoiceScribe"
 cp Info.plist "$CONTENTS/Info.plist"
 
+# Build .icns from iconset (macOS only)
+RESOURCES="$CONTENTS/Resources"
+mkdir -p "$RESOURCES"
+if [ -d "VoiceScribe.iconset" ]; then
+    iconutil -c icns -o "$RESOURCES/AppIcon.icns" VoiceScribe.iconset 2>/dev/null || true
+fi
+
 if [ -f VoiceScribe.entitlements ]; then
     codesign --force --sign - --entitlements VoiceScribe.entitlements "$MACOS/VoiceScribe" 2>/dev/null || true
 fi
