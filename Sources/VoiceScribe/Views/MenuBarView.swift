@@ -87,6 +87,7 @@ struct MenuBarView: View {
         if appState.isRecording { return "Recording..." }
         if appState.isTranscribing { return "Transcribing..." }
         switch appState.modelState {
+        case .checking: return "Loading model..."
         case .ready: return "Ready"
         case .notDownloaded: return "Model Not Downloaded"
         case .downloading(let p): return "Downloading \(Int(p * 100))%"

@@ -72,6 +72,9 @@ struct SettingsView: View {
                     }
 
                     switch appState.modelState {
+                    case .checking:
+                        Label("Loading model...", systemImage: "ellipsis.circle")
+                            .foregroundColor(.secondary)
                     case .ready:
                         Label("Model loaded", systemImage: "checkmark.circle.fill")
                             .foregroundColor(.green)
