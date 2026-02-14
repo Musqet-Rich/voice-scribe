@@ -75,6 +75,7 @@ final class TranscriptionEngine {
         print("[VoiceScribe] Loading model from \(modelFolder.path)...")
         let config = WhisperKitConfig(
             modelFolder: modelFolder.path,
+            tokenizerFolder: modelDir,
             verbose: true,
             prewarm: true,
             load: true,
