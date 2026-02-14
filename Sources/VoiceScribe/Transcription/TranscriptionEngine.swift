@@ -49,11 +49,23 @@ final class TranscriptionEngine {
 
     /// Try to load an already-downloaded model (no download, just init)
     func loadExistingModel(model: WhisperModel, modelDir: URL) async throws {
+        // WhisperKit stores models at: downloadBase/models/argmaxinc/whisperkit-coreml/{model}/
+        let modelFolder = modelDir
+            .appendingPathComponent("models")
+            .appendingPathComponent("argmaxinc")
+            .appendingPathComponent("whisperkit-coreml")
+            .appendingPathComponent(model.rawValue)
+
+        guard FileManager.default.fileExists(atPath: modelFolder.path) else {
+            throw TranscriptionError.modelNotLoaded
+        }
+
         let config = WhisperKitConfig(
-            model: model.rawValue,
-            downloadBase: modelDir,
+            modelFolder: modelFolder.path,
             verbose: false,
-            prewarm: true
+            prewarm: true,
+            load: true,
+            download: false
         )
         self.whisperKit = try await WhisperKit(config)
     }
