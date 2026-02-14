@@ -21,10 +21,10 @@ enum ModelState: Equatable {
 
 /// Available WhisperKit models
 enum WhisperModel: String, CaseIterable, Identifiable {
-    case baseEn = "base.en"
-    case smallEn = "small.en"
-    case largeV3 = "large-v3"
-    case largeV3Turbo = "large-v3-turbo"
+    case baseEn = "openai_whisper-base.en"
+    case smallEn = "openai_whisper-small.en"
+    case largeV3 = "openai_whisper-large-v3"
+    case largeV3Turbo = "openai_whisper-large-v3_turbo"
 
     var id: String { rawValue }
 
