@@ -12,9 +12,9 @@ final class PasteManager {
         // Save current clipboard content
         let previousContents = pasteboard.string(forType: .string)
 
-        // Set our text
+        // Set our text with trailing space for natural continuation
         pasteboard.clearContents()
-        pasteboard.setString(text, forType: .string)
+        pasteboard.setString(text + " ", forType: .string)
 
         // Small delay to ensure pasteboard is ready
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
