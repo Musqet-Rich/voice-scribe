@@ -19,7 +19,17 @@ struct VoiceScribeApp: App {
             case .ready:
                 MenuBarView(appState: appState, openSettingsWindow: {
                     NSApplication.shared.activate(ignoringOtherApps: true)
-                    openWindow(id: "main")
+                    // openWindow doesn't work from MenuBarExtra context,
+                    // so find the window directly
+                    if let window = NSApplication.shared.windows.first(where: {
+                        $0.identifier?.rawValue.contains("main") == true ||
+                        $0.title == "Voice Scribe"
+                    }) {
+                        window.makeKeyAndOrderFront(nil)
+                    } else {
+                        // Fallback: try environment openWindow
+                        openWindow(id: "main")
+                    }
                 })
             default:
                 DownloadView(appState: appState)
