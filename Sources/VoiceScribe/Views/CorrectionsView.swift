@@ -1,10 +1,9 @@
 import SwiftUI
 import UniformTypeIdentifiers
 
-/// Manages the corrections dictionary
-struct CorrectionsView: View {
+/// Reusable corrections content — used in both sheet and window tab
+struct CorrectionsContent: View {
     @ObservedObject var appState: AppState
-    @Environment(\.dismiss) private var dismiss
     @State private var newOriginal = ""
     @State private var newCorrected = ""
     @State private var showImporter = false
@@ -12,19 +11,21 @@ struct CorrectionsView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            // Header
+            // Toolbar
             HStack {
-                Text("Corrections")
-                    .font(.headline)
+                Button("Import") {
+                    NSApplication.shared.activate(ignoringOtherApps: true)
+                    showImporter = true
+                }
+                Button("Export") {
+                    NSApplication.shared.activate(ignoringOtherApps: true)
+                    showExporter = true
+                }
+                .disabled(appState.corrections.isEmpty)
                 Spacer()
-                Button("Import") { showImporter = true }
-                Button("Export") { showExporter = true }
-                    .disabled(appState.corrections.isEmpty)
-                Button("Done") { dismiss() }
             }
-            .padding()
-
-            Divider()
+            .padding(.horizontal)
+            .padding(.top, 8)
 
             // Add new correction
             HStack {
@@ -83,7 +84,6 @@ struct CorrectionsView: View {
                 }
             }
         }
-        .frame(width: 500, height: 400)
         .fileImporter(
             isPresented: $showImporter,
             allowedContentTypes: [UTType.json]
@@ -101,6 +101,38 @@ struct CorrectionsView: View {
             contentType: .json,
             defaultFilename: "corrections.json"
         ) { _ in }
+    }
+}
+
+/// Window tab version
+struct CorrectionsWindowContent: View {
+    @ObservedObject var appState: AppState
+
+    var body: some View {
+        CorrectionsContent(appState: appState)
+    }
+}
+
+/// Sheet version with dismiss button (legacy menubar sheet)
+struct CorrectionsView: View {
+    @ObservedObject var appState: AppState
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack {
+                Text("Corrections")
+                    .font(.headline)
+                Spacer()
+                Button("Done") { dismiss() }
+            }
+            .padding()
+
+            Divider()
+
+            CorrectionsContent(appState: appState)
+        }
+        .frame(width: 500, height: 400)
     }
 }
 

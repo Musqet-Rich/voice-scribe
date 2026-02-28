@@ -1,27 +1,24 @@
 import SwiftUI
 
-/// Displays transcription history with copy and correction actions
-struct HistoryView: View {
+/// Reusable history content — used in both sheet and window tab
+struct HistoryContent: View {
     @ObservedObject var appState: AppState
-    @Environment(\.dismiss) private var dismiss
     @State private var correctionOriginal = ""
     @State private var correctionReplacement = ""
     @State private var showCorrectionForm = false
 
     var body: some View {
         VStack(spacing: 0) {
-            // Header
+            // Toolbar
             HStack {
-                Text("Transcription History")
-                    .font(.headline)
-                Spacer()
                 Button("Clear All") {
                     appState.clearHistory()
                 }
                 .disabled(appState.history.isEmpty)
-                Button("Done") { dismiss() }
+                Spacer()
             }
-            .padding()
+            .padding(.horizontal)
+            .padding(.top, 8)
 
             Divider()
 
@@ -78,7 +75,6 @@ struct HistoryView: View {
                 }
             }
         }
-        .frame(width: 400, height: 500)
         .sheet(isPresented: $showCorrectionForm) {
             CorrectionFormSheet(
                 original: $correctionOriginal,
@@ -90,6 +86,38 @@ struct HistoryView: View {
                 onCancel: { showCorrectionForm = false }
             )
         }
+    }
+}
+
+/// Window tab version
+struct HistoryWindowContent: View {
+    @ObservedObject var appState: AppState
+
+    var body: some View {
+        HistoryContent(appState: appState)
+    }
+}
+
+/// Sheet version with dismiss button (legacy menubar sheet)
+struct HistoryView: View {
+    @ObservedObject var appState: AppState
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack {
+                Text("Transcription History")
+                    .font(.headline)
+                Spacer()
+                Button("Done") { dismiss() }
+            }
+            .padding()
+
+            Divider()
+
+            HistoryContent(appState: appState)
+        }
+        .frame(width: 400, height: 500)
     }
 }
 

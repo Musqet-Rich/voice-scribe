@@ -3,9 +3,7 @@ import SwiftUI
 /// Main menubar popover content
 struct MenuBarView: View {
     @ObservedObject var appState: AppState
-    @State private var showHistory = false
-    @State private var showCorrections = false
-    @State private var showSettings = false
+    var openSettingsWindow: (() -> Void)?
 
     var body: some View {
         VStack(spacing: 12) {
@@ -19,8 +17,12 @@ struct MenuBarView: View {
 
             Divider()
 
-            // Navigation buttons
-            navigationButtons
+            // Open settings window
+            Button("Open Settings Window…") {
+                openSettingsWindow?()
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .buttonStyle(.plain)
 
             Divider()
 
@@ -105,36 +107,5 @@ struct MenuBarView: View {
             .disabled(appState.modelState != .ready || appState.isTranscribing)
             .frame(maxWidth: .infinity)
         }
-    }
-
-    // MARK: - Navigation Buttons
-
-    private var navigationButtons: some View {
-        VStack(spacing: 4) {
-            Button("History (\(appState.history.count))") {
-                showHistory = true
-            }
-            .sheet(isPresented: $showHistory) {
-                HistoryView(appState: appState)
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-
-            Button("Corrections (\(appState.corrections.count))") {
-                showCorrections = true
-            }
-            .sheet(isPresented: $showCorrections) {
-                CorrectionsView(appState: appState)
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-
-            Button("Settings") {
-                showSettings = true
-            }
-            .sheet(isPresented: $showSettings) {
-                SettingsView(appState: appState)
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-        }
-        .buttonStyle(.plain)
     }
 }
