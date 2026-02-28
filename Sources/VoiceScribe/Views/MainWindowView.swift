@@ -5,24 +5,35 @@ struct MainWindowView: View {
     @State private var selectedTab = "settings"
 
     var body: some View {
-        TabView(selection: $selectedTab) {
-            SettingsWindowContent(appState: appState)
-                .tabItem {
-                    Label("Settings", systemImage: "gear")
-                }
-                .tag("settings")
+        Group {
+            if case .ready = appState.modelState {
+                TabView(selection: $selectedTab) {
+                    SettingsWindowContent(appState: appState)
+                        .tabItem {
+                            Label("Settings", systemImage: "gear")
+                        }
+                        .tag("settings")
 
-            CorrectionsWindowContent(appState: appState)
-                .tabItem {
-                    Label("Corrections", systemImage: "text.badge.checkmark")
-                }
-                .tag("corrections")
+                    CorrectionsWindowContent(appState: appState)
+                        .tabItem {
+                            Label("Corrections", systemImage: "text.badge.checkmark")
+                        }
+                        .tag("corrections")
 
-            HistoryWindowContent(appState: appState)
-                .tabItem {
-                    Label("History", systemImage: "clock")
+                    HistoryWindowContent(appState: appState)
+                        .tabItem {
+                            Label("History", systemImage: "clock")
+                        }
+                        .tag("history")
                 }
-                .tag("history")
+            } else {
+                VStack(spacing: 16) {
+                    ProgressView()
+                    Text("Loading model...")
+                        .foregroundColor(.secondary)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
         }
         .frame(minWidth: 500, minHeight: 400)
     }
