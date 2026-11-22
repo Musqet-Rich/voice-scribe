@@ -80,3 +80,7 @@ Speech models are cached by FluidAudio under `~/Library/Application Support/Flui
 
 - Use headphones on calls. On speakers, your mic picks up the other side and it gets attributed to you.
 - Corrections are applied as whole-word, case-insensitive replacements. A plain term mapped to itself (`"Odoo": "Odoo"`) fixes its capitalisation.
+
+## Licence
+
+MIT, see [LICENSE](LICENSE). Speech models are downloaded separately and carry their own licences (Bark 3.0: CC-BY-4.0; Parakeet: CC-BY-4.0).
