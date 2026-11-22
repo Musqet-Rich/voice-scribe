@@ -7,6 +7,9 @@ final class AudioRecorder {
     private var samples: [Float] = []
     private let lock = NSLock()
 
+    /// Called on the main thread with the mic level (0...1) roughly 30 times a second
+    var onLevel: ((Float) -> Void)?
+
     static func requestPermission() async -> Bool {
         switch AVCaptureDevice.authorizationStatus(for: .audio) {
         case .authorized: return true
@@ -36,7 +39,7 @@ final class AudioRecorder {
         // Stereo receivers (e.g. DJI Mic with one transmitter per channel): mix down rather than drop channel 2
         converter.downmix = true
 
-        inputNode.installTap(onBus: 0, bufferSize: 4096, format: inputFormat) { [weak self] buffer, _ in
+        inputNode.installTap(onBus: 0, bufferSize: 1024, format: inputFormat) { [weak self] buffer, _ in
             guard let self else { return }
             let capacity = AVAudioFrameCount(
                 Double(buffer.frameLength) * targetFormat.sampleRate / inputFormat.sampleRate
@@ -57,6 +60,14 @@ final class AudioRecorder {
             guard error == nil, let channel = out.floatChannelData?[0] else { return }
             let chunk = Array(UnsafeBufferPointer(start: channel, count: Int(out.frameLength)))
             self.lock.withLock { self.samples.append(contentsOf: chunk) }
+
+            if let onLevel = self.onLevel, !chunk.isEmpty {
+                let rms = sqrt(chunk.reduce(0) { $0 + $1 * $1 } / Float(chunk.count))
+                // Map roughly -50dB...-10dB to 0...1
+                let db = 20 * log10(max(rms, 1e-6))
+                let level = min(max((db + 50) / 40, 0), 1)
+                DispatchQueue.main.async { onLevel(level) }
+            }
         }
 
         engine.prepare()

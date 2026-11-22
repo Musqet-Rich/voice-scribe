@@ -82,6 +82,14 @@ final class AppState: ObservableObject {
         inputDevices = InputDevices.all()
     }
 
+    @Published var soundCues: Bool {
+        didSet { UserDefaults.standard.set(soundCues, forKey: "soundCues") }
+    }
+    @Published var showPill: Bool {
+        didSet { UserDefaults.standard.set(showPill, forKey: "showPill") }
+    }
+    let pill = PillController()
+
     @Published var keepCallAudio: Bool {
         didSet { UserDefaults.standard.set(keepCallAudio, forKey: "keepCallAudio") }
     }
@@ -118,12 +126,16 @@ final class AppState: ObservableObject {
             "polishEnabled": false,
             "summariseCalls": true,
             "keepCallAudio": true,
+            "soundCues": false,
+            "showPill": true,
         ])
         selectedModel = SpeechModel(rawValue: defaults.string(forKey: "speechModel") ?? "") ?? .bark3Clean
         minimumHoldDuration = defaults.double(forKey: "minimumHoldDuration")
         polishEnabled = defaults.bool(forKey: "polishEnabled")
         summariseCalls = defaults.bool(forKey: "summariseCalls")
         keepCallAudio = defaults.bool(forKey: "keepCallAudio")
+        soundCues = defaults.bool(forKey: "soundCues")
+        showPill = defaults.bool(forKey: "showPill")
         inputDeviceUID = defaults.string(forKey: "inputDeviceUID") ?? ""
         inputDevices = InputDevices.all()
         var loaded: [ShortcutAction: [Shortcut]] = [:]
@@ -134,6 +146,9 @@ final class AppState: ObservableObject {
         shortcuts = loaded
 
         loadHistory()
+        audioRecorder.onLevel = { [weak self] level in
+            MainActor.assumeIsolated { self?.pill.setLevel(level) }
+        }
         corrections = correctionsManager.corrections
         reloadCalls()
         setupHotkeys()
@@ -180,7 +195,8 @@ final class AppState: ObservableObject {
         do {
             refreshInputDevices()
             try audioRecorder.startRecording(deviceUID: effectiveDeviceUID)
-            tonePlayer.playStartTone()
+            if soundCues { tonePlayer.playStartTone() }
+            if showPill { pill.show(.listening) }
             isRecording = true
             recordingStartTime = Date()
             lastError = nil
@@ -194,6 +210,7 @@ final class AppState: ObservableObject {
         guard isRecording else { return }
         _ = audioRecorder.stopRecording()
         isRecording = false
+        pill.hide()
     }
 
     func stopRecording() {
@@ -201,14 +218,21 @@ final class AppState: ObservableObject {
         isRecording = false
         let samples = audioRecorder.stopRecording()
         let duration = recordingStartTime.map { Date().timeIntervalSince($0) } ?? 0
-        guard duration >= minimumHoldDuration else { return }
-        tonePlayer.playStopTone()
+        guard duration >= minimumHoldDuration else {
+            pill.hide()
+            return
+        }
+        if soundCues { tonePlayer.playStopTone() }
+        if showPill { pill.show(.transcribing) }
 
         isTranscribing = true
         let polish = polishEnabled
         let vocabulary = correctionsManager.corrections.map(\.corrected)
         Task {
-            defer { isTranscribing = false }
+            defer {
+                isTranscribing = false
+                pill.hide()
+            }
             do {
                 let raw = try await transcriptionEngine.transcribe(samples: samples)
                 guard !raw.isEmpty else { throw TranscriptionError.emptyResult }
@@ -254,7 +278,7 @@ final class AppState: ObservableObject {
             currentCall = call
             isCallRecording = true
             callStartTime = Date()
-            tonePlayer.playStartTone()
+            if soundCues { tonePlayer.playStartTone() }
             lastError = nil
         } catch {
             lastError = error.localizedDescription
@@ -268,7 +292,7 @@ final class AppState: ObservableObject {
         isCallRecording = false
         callStartTime = nil
         currentCall = nil
-        tonePlayer.playStopTone()
+        if soundCues { tonePlayer.playStopTone() }
         reloadCalls()
         transcribeCall(call)
     }

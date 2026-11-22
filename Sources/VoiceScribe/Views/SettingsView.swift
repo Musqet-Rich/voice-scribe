@@ -27,6 +27,8 @@ struct SettingsFormContent: View {
             }
 
             Section("Dictation") {
+                Toggle("Show listening pill at the bottom of the screen", isOn: $appState.showPill)
+                Toggle("Play start/stop sounds", isOn: $appState.soundCues)
                 HStack {
                     Text("Min hold duration:")
                     Slider(value: $appState.minimumHoldDuration, in: 0.1...1.0, step: 0.1)
