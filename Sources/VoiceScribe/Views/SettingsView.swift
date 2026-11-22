@@ -29,6 +29,10 @@ struct SettingsFormContent: View {
             Section("Dictation") {
                 Toggle("Show listening pill at the bottom of the screen", isOn: $appState.showPill)
                 Toggle("Play start/stop sounds", isOn: $appState.soundCues)
+                Toggle("Learn corrections from my edits", isOn: $appState.learnFromEdits)
+                Text("After pasting, Voice Scribe watches the text box for a minute. If you fix a misheard word, it's added to Corrections (with Undo). Your local AI model judges whether an edit is a mishearing or a change of mind.")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
                 HStack {
                     Text("Min hold duration:")
                     Slider(value: $appState.minimumHoldDuration, in: 0.1...1.0, step: 0.1)
@@ -45,6 +49,8 @@ struct SettingsFormContent: View {
                     .font(.caption)
                     .foregroundColor(.secondary)
             }
+
+            CallDetectionSection(appState: appState)
 
             AISection(appState: appState)
 
@@ -181,5 +187,58 @@ struct AISection: View {
             ollamaChecked = true
         }
         .onChange(of: polishModel) { _, m in TextPolisher.warmUp(model: m) }
+    }
+}
+
+/// Per-app call detection settings, plus a live view of what's using the mic
+struct CallDetectionSection: View {
+    @ObservedObject var appState: AppState
+    @State private var usingMic: [String] = []
+    private let timer = Timer.publish(every: 2, on: .main, in: .common).autoconnect()
+
+    var body: some View {
+        Section("Call detection") {
+            Text("When one of these starts using the microphone, Voice Scribe can ask to record or record automatically. Recordings it starts stop when the app releases the mic.")
+                .font(.caption)
+                .foregroundColor(.secondary)
+
+            ForEach(WatchedApp.all.filter { !$0.isBrowser }) { app in row(app) }
+
+            Text("Browsers")
+                .font(.subheadline.weight(.semibold))
+                .padding(.top, 4)
+            ForEach(WatchedApp.all.filter(\.isBrowser)) { app in row(app) }
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Using the microphone right now")
+                    .font(.subheadline.weight(.semibold))
+                if usingMic.isEmpty {
+                    Text("Nothing").font(.caption).foregroundColor(.secondary)
+                } else {
+                    ForEach(usingMic, id: \.self) { Text($0).font(.caption.monospaced()) }
+                }
+            }
+            .padding(.top, 4)
+        }
+        .onAppear(perform: refresh)
+        .onReceive(timer) { _ in refresh() }
+    }
+
+    private func row(_ app: WatchedApp) -> some View {
+        Picker(app.name, selection: Binding(
+            get: { appState.callMode(for: app) },
+            set: { appState.callModes[app.id] = $0 }
+        )) {
+            ForEach(CallAppMode.allCases) { Text($0.label).tag($0) }
+        }
+        .pickerStyle(.segmented)
+    }
+
+    private func refresh() {
+        let own = Bundle.main.bundleIdentifier ?? "com.monomi.voice-scribe"
+        usingMic = Array(Set(CallDetector.bundleIDsCapturingInput().filter { !$0.hasPrefix(own) })).sorted().map { id in
+            if let app = WatchedApp.matching(bundleID: id) { return "\(app.name)  (\(id))" }
+            return id
+        }
     }
 }

@@ -90,6 +90,29 @@ final class AppState: ObservableObject {
     }
     let pill = PillController()
 
+    // MARK: - Learning corrections from edits
+    @Published var learnFromEdits: Bool {
+        didSet { UserDefaults.standard.set(learnFromEdits, forKey: "learnFromEdits") }
+    }
+    private let editWatcher = EditWatcher()
+    private let toast = CallPromptController(verticalOffset: 76)
+
+    // MARK: - Call detection
+    /// Per-app behaviour when it starts using the mic (WatchedApp.id → mode)
+    @Published var callModes: [String: CallAppMode] {
+        didSet {
+            if let data = try? JSONEncoder().encode(callModes) {
+                UserDefaults.standard.set(data, forKey: "callModes")
+            }
+        }
+    }
+    private let callDetector = CallDetector()
+    private let callPrompt = CallPromptController()
+    /// The detected app whose call we are recording (auto-stops when it releases the mic)
+    private var recordingDetectedApp: String?
+
+    func callMode(for app: WatchedApp) -> CallAppMode { callModes[app.id] ?? .ask }
+
     @Published var keepCallAudio: Bool {
         didSet { UserDefaults.standard.set(keepCallAudio, forKey: "keepCallAudio") }
     }
@@ -128,6 +151,7 @@ final class AppState: ObservableObject {
             "keepCallAudio": true,
             "soundCues": false,
             "showPill": true,
+            "learnFromEdits": true,
         ])
         selectedModel = SpeechModel(rawValue: defaults.string(forKey: "speechModel") ?? "") ?? .bark3Clean
         minimumHoldDuration = defaults.double(forKey: "minimumHoldDuration")
@@ -136,6 +160,9 @@ final class AppState: ObservableObject {
         keepCallAudio = defaults.bool(forKey: "keepCallAudio")
         soundCues = defaults.bool(forKey: "soundCues")
         showPill = defaults.bool(forKey: "showPill")
+        learnFromEdits = defaults.bool(forKey: "learnFromEdits")
+        callModes = defaults.data(forKey: "callModes")
+            .flatMap { try? JSONDecoder().decode([String: CallAppMode].self, from: $0) } ?? [:]
         inputDeviceUID = defaults.string(forKey: "inputDeviceUID") ?? ""
         inputDevices = InputDevices.all()
         var loaded: [ShortcutAction: [Shortcut]] = [:]
@@ -152,6 +179,10 @@ final class AppState: ObservableObject {
         corrections = correctionsManager.corrections
         reloadCalls()
         setupHotkeys()
+        setupCallDetection()
+        editWatcher.onEdits = { [weak self] edits in
+            MainActor.assumeIsolated { self?.considerEdits(edits) }
+        }
 
         Task {
             _ = await AudioRecorder.requestPermission()
@@ -193,6 +224,7 @@ final class AppState: ObservableObject {
     func startRecording() {
         guard !isRecording, !isTranscribing, modelState == .ready else { return }
         do {
+            editWatcher.finish()
             refreshInputDevices()
             try audioRecorder.startRecording(deviceUID: effectiveDeviceUID)
             if soundCues { tonePlayer.playStartTone() }
@@ -241,6 +273,7 @@ final class AppState: ObservableObject {
                     text = correctionsManager.apply(await TextPolisher.polishDictation(text, vocabulary: vocabulary))
                 }
                 pasteManager.paste(text)
+                if learnFromEdits { editWatcher.watch(pasted: text) }
                 history.insert(TranscriptionItem(text: raw, correctedText: text, duration: duration), at: 0)
                 saveHistory()
             } catch {
@@ -259,11 +292,13 @@ final class AppState: ObservableObject {
         isCallRecording ? stopCall() : startCall()
     }
 
-    func startCall() {
+    func startCall(label: String? = nil) {
         guard !isCallRecording else { return }
         let formatter = DateFormatter()
         formatter.dateFormat = "yyyy-MM-dd HHmm"
-        let folder = Self.callsDir.appendingPathComponent(formatter.string(from: Date()))
+        var name = formatter.string(from: Date())
+        if let label { name += " \(label)" }
+        let folder = Self.callsDir.appendingPathComponent(name)
         let call = CallRecord(folder: folder)
         do {
             try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
@@ -287,6 +322,7 @@ final class AppState: ObservableObject {
 
     func stopCall() {
         guard isCallRecording, let call = currentCall else { return }
+        recordingDetectedApp = nil
         micFileRecorder.stop()
         systemAudioRecorder.stop()
         isCallRecording = false
@@ -331,6 +367,46 @@ final class AppState: ObservableObject {
             .filter { (try? $0.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true }
             .map(CallRecord.init(folder:))
             .sorted { $0.name > $1.name }
+    }
+
+    // MARK: - Call detection
+
+    private func setupCallDetection() {
+        callDetector.onCallStarted = { [weak self] app in
+            MainActor.assumeIsolated { self?.detectedCallStarted(app) }
+        }
+        callDetector.onCallEnded = { [weak self] app in
+            MainActor.assumeIsolated { self?.detectedCallEnded(app) }
+        }
+        callDetector.start()
+    }
+
+    private func detectedCallStarted(_ app: WatchedApp) {
+        guard !isCallRecording, modelState == .ready else { return }
+        switch callMode(for: app) {
+        case .off:
+            return
+        case .auto:
+            startDetectedCall(app)
+            if isCallRecording {
+                callPrompt.notifyAutoRecording(app) { [weak self] in self?.stopCall() }
+            }
+        case .ask:
+            callPrompt.ask(app, onRecord: { [weak self] in
+                self?.startDetectedCall(app)
+            }, onIgnore: {})
+        }
+    }
+
+    private func detectedCallEnded(_ app: WatchedApp) {
+        if callPrompt.appID == app.id { callPrompt.dismiss() }
+        if isCallRecording, recordingDetectedApp == app.id { stopCall() }
+    }
+
+    private func startDetectedCall(_ app: WatchedApp) {
+        guard !isCallRecording else { return }
+        startCall(label: app.name.components(separatedBy: " (").first)
+        if isCallRecording { recordingDetectedApp = app.id }
     }
 
     // MARK: - Hotkeys
@@ -388,6 +464,62 @@ final class AppState: ObservableObject {
     func addCorrection(original: String, corrected: String) {
         correctionsManager.add(original: original, corrected: corrected)
         corrections = correctionsManager.corrections
+    }
+
+    /// Decide which observed edits are recognition errors and learn them
+    private func considerEdits(_ edits: [ObservedEdit]) {
+        guard learnFromEdits else { return }
+        for edit in edits {
+            let existing = correctionsManager.corrections.first {
+                $0.original.caseInsensitiveCompare(edit.heard) == .orderedSame
+            }
+            if existing?.corrected == edit.fixed { continue }
+            Task {
+                let verdict = await TextPolisher.judgeEdit(
+                    heard: edit.heard, fixed: edit.fixed, context: edit.context,
+                    vocabulary: correctionsManager.corrections.map(\.corrected)
+                )
+                let learn: Bool
+                switch verdict {
+                case .mishearing: learn = true
+                case .rewrite: learn = false
+                case .unknown: learn = Self.looksLikeMishearing(edit.heard, edit.fixed)  // no AI: similarity only
+                }
+                guard learn else { return }
+                addCorrection(original: edit.heard, corrected: edit.fixed)
+                toast.show(
+                    icon: "text.badge.checkmark", colour: .green,
+                    title: "Added: \(edit.heard) → \(edit.fixed)",
+                    subtitle: "Learnt from your edit",
+                    primary: ("Undo", { [weak self] in
+                        guard let self else { return }
+                        self.correctionsManager.remove(original: edit.heard)
+                        if let existing { self.correctionsManager.add(original: existing.original, corrected: existing.corrected) }
+                        self.corrections = self.correctionsManager.corrections
+                    }),
+                    secondary: nil,
+                    autoDismissAfter: 6
+                )
+            }
+        }
+    }
+
+    /// Fallback when no AI is available: case-only change, or the words are spelt similarly
+    nonisolated static func looksLikeMishearing(_ a: String, _ b: String) -> Bool {
+        if a.caseInsensitiveCompare(b) == .orderedSame { return true }
+        let x = Array(a.lowercased()), y = Array(b.lowercased())
+        var row = Array(0...y.count)
+        for i in 1...max(x.count, 1) where !x.isEmpty {
+            var prev = row[0]
+            row[0] = i
+            for j in stride(from: 1, through: y.count, by: 1) {
+                let tmp = row[j]
+                row[j] = min(row[j] + 1, row[j - 1] + 1, prev + (x[i - 1] == y[j - 1] ? 0 : 1))
+                prev = tmp
+            }
+        }
+        let distance = row[y.count]
+        return Double(distance) / Double(max(x.count, y.count, 1)) <= 0.5
     }
 
     func removeCorrection(_ correction: Correction) {

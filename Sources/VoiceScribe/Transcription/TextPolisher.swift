@@ -71,6 +71,48 @@ enum TextPolisher {
         return (cleaned.isEmpty || ratio < 0.5 || ratio > 1.5) ? text : cleaned
     }
 
+    // MARK: - Learning corrections
+
+    /// Model used for quick yes/no judgements: the polish model, else the summary model
+    static var judgeModel: String { polishModel.isEmpty ? summaryModel : polishModel }
+
+    static var canJudge: Bool {
+        switch engine {
+        case .off: return false
+        case .apple: return appleAvailable
+        case .ollama: return !judgeModel.isEmpty
+        }
+    }
+
+    enum EditVerdict { case mishearing, rewrite, unknown }
+
+    /// Decide whether the user's edit fixes a speech-recognition error (worth learning)
+    /// or changes what they meant to say (not worth learning)
+    static func judgeEdit(heard: String, fixed: String, context: String, vocabulary: [String]) async -> EditVerdict {
+        guard canJudge else { return .unknown }
+        let vocabLine = vocabulary.isEmpty ? "" :
+            "\nThe user's own names and terms include: \(Array(Set(vocabulary)).sorted().joined(separator: ", "))."
+        let instructions = """
+        You review edits a user made to text produced by a speech recogniser. Decide whether the edit fixes a \
+        RECOGNITION ERROR or is a REWRITE.
+        RECOGNITION ERROR: the recogniser wrote the wrong word for what was said. Typical: a name, company, product, \
+        technical term or acronym transcribed as a similar-sounding ordinary word or wrong spelling (e.g. 'mask it' \
+        for 'Musqet', 'Jacob' for 'Jakub'), or wrong capitalisation. The new text sounds like the old text.
+        REWRITE: the user changed the meaning: a different day, number, person, verb or idea, or a word that does \
+        not sound alike.\(vocabLine)
+        Reply with exactly one word: ERROR or REWRITE.
+        """
+        let prompt = """
+        Transcribed text: "\(context)"
+        The user changed "\(heard)" to "\(fixed)".
+        """
+        guard let reply = await respond(instructions: instructions, prompt: prompt, model: judgeModel)?
+            .uppercased() else { return .unknown }
+        if reply.contains("REWRITE") { return .rewrite }
+        if reply.contains("ERROR") { return .mishearing }
+        return .unknown
+    }
+
     // MARK: - Call summaries
 
     static func summariseCall(_ transcript: String) async -> String? {
