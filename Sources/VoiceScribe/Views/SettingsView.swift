@@ -1,5 +1,4 @@
 import SwiftUI
-import HotKey
 
 /// Reusable settings form content — used in both the sheet and window tab
 struct SettingsFormContent: View {
@@ -7,41 +6,27 @@ struct SettingsFormContent: View {
 
     var body: some View {
         Form {
-            // MARK: - Hotkeys Section
-            Section("Hotkeys") {
-                HStack {
-                    Text("Hold to talk:")
-                    Spacer()
-                    Text("F1")
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 4)
-                        .background(Color.secondary.opacity(0.2))
-                        .cornerRadius(4)
-                    Text("(change in code)")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                }
+            ShortcutsSection(appState: appState)
 
-                HStack {
-                    Text("Toggle recording:")
-                    Spacer()
-                    Text("F2")
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 4)
-                        .background(Color.secondary.opacity(0.2))
-                        .cornerRadius(4)
-                    Text("(change in code)")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
+            // MARK: - Recording Section
+            Section("Microphone") {
+                Picker("Microphone:", selection: $appState.inputDeviceUID) {
+                    Text("System default (\(InputDevices.defaultInputName() ?? "unknown"))").tag("")
+                    ForEach(appState.inputDevices) { device in
+                        Text(device.name).tag(device.uid)
+                    }
+                    if !appState.inputDeviceUID.isEmpty,
+                       !appState.inputDevices.contains(where: { $0.uid == appState.inputDeviceUID }) {
+                        Text("Saved mic (not connected, using default)").tag(appState.inputDeviceUID)
+                    }
                 }
-
-                Text("Tip: Grant Accessibility permissions to VoiceScribe in System Settings → Privacy & Security → Accessibility")
+                .onAppear { appState.refreshInputDevices() }
+                Text("If the chosen mic is unplugged, the macOS default is used until it's back.")
                     .font(.caption)
                     .foregroundColor(.secondary)
             }
 
-            // MARK: - Recording Section
-            Section("Recording") {
+            Section("Dictation") {
                 HStack {
                     Text("Min hold duration:")
                     Slider(value: $appState.minimumHoldDuration, in: 0.1...1.0, step: 0.1)
@@ -51,10 +36,20 @@ struct SettingsFormContent: View {
                 }
             }
 
+            // MARK: - Calls Section
+            Section("Calls") {
+                Toggle("Keep call audio after transcribing", isOn: $appState.keepCallAudio)
+                Text("Records your mic and the Mac's audio output as separate tracks. Use headphones, otherwise the other side also gets picked up by your mic.")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+            }
+
+            AISection(appState: appState)
+
             // MARK: - Model Section
             Section("Model") {
-                Picker("Whisper model:", selection: $appState.selectedModel) {
-                    ForEach(WhisperModel.allCases) { model in
+                Picker("Speech model:", selection: $appState.selectedModel) {
+                    ForEach(SpeechModel.allCases) { model in
                         Text(model.displayName).tag(model)
                     }
                 }
@@ -78,7 +73,7 @@ struct SettingsFormContent: View {
                         .font(.caption)
                 }
 
-                Text("Models stored in ~/.voice-scribe/models/")
+                Text("Models download once, then run fully offline.")
                     .font(.caption)
                     .foregroundColor(.secondary)
             }
@@ -87,7 +82,7 @@ struct SettingsFormContent: View {
             Section("About") {
                 Text("Voice Scribe")
                     .fontWeight(.semibold)
-                Text("Local speech-to-text powered by WhisperKit")
+                Text("Local speech-to-text: Parakeet via FluidAudio, on the Neural Engine")
                     .font(.caption)
                     .foregroundColor(.secondary)
                 Text("Data stored in ~/.voice-scribe/")
@@ -128,5 +123,61 @@ struct SettingsView: View {
             SettingsFormContent(appState: appState)
         }
         .frame(width: 450, height: 500)
+    }
+}
+
+/// Local LLM settings: engine, models, and what to use it for
+struct AISection: View {
+    @ObservedObject var appState: AppState
+    @AppStorage("aiEngine") private var engine: AIEngine = .off
+    @AppStorage("ollamaPolishModel") private var polishModel = ""
+    @AppStorage("ollamaSummaryModel") private var summaryModel = ""
+    @State private var models: [String] = []
+    @State private var ollamaChecked = false
+
+    var body: some View {
+        Section("AI (local)") {
+            Picker("Engine:", selection: $engine) {
+                ForEach(AIEngine.allCases) { e in
+                    Text(e.displayName).tag(e)
+                }
+            }
+
+            if engine == .apple, !TextPolisher.appleAvailable {
+                Text("Apple Intelligence isn't enabled on this Mac.")
+                    .font(.caption).foregroundColor(.orange)
+            }
+
+            if engine == .ollama {
+                if ollamaChecked && models.isEmpty {
+                    Text("Ollama isn't running. Start it (ollama serve or the Ollama app), then reopen Settings.")
+                        .font(.caption).foregroundColor(.orange)
+                } else {
+                    Picker("Polish model:", selection: $polishModel) {
+                        Text("None").tag("")
+                        ForEach(models, id: \.self) { Text($0).tag($0) }
+                    }
+                    Picker("Summary model:", selection: $summaryModel) {
+                        Text("None").tag("")
+                        ForEach(models, id: \.self) { Text($0).tag($0) }
+                    }
+                    Text("Polish runs after every dictation, so use a small, fast model (e.g. ollama pull qwen3:4b). Summaries run once per call, so a big model is fine.")
+                        .font(.caption).foregroundColor(.secondary)
+                }
+            }
+
+            if engine != .off {
+                Toggle("Polish dictation (punctuation, self-corrections, British spelling)", isOn: $appState.polishEnabled)
+                    .disabled(!TextPolisher.canPolish)
+                Toggle("Summarise calls (summary, decisions, action items)", isOn: $appState.summariseCalls)
+                    .disabled(!TextPolisher.canSummarise)
+            }
+        }
+        .task(id: engine) {
+            guard engine == .ollama else { return }
+            models = await TextPolisher.ollamaModels()
+            ollamaChecked = true
+        }
+        .onChange(of: polishModel) { _, m in TextPolisher.warmUp(model: m) }
     }
 }

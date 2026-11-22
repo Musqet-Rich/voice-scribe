@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// Voice Scribe — a macOS menubar app for local speech-to-text using WhisperKit
+/// Voice Scribe — a macOS menubar app for local speech-to-text using Parakeet (FluidAudio)
 @main
 struct VoiceScribeApp: App {
     @StateObject private var appState = AppState()
@@ -38,9 +38,9 @@ struct VoiceScribeApp: App {
             Label {
                 Text("Voice Scribe")
             } icon: {
-                Image(systemName: appState.isRecording ? "mic.fill" : "mic")
+                Image(systemName: appState.isCallRecording ? "phone.fill" : (appState.isRecording ? "mic.fill" : "mic"))
                     .symbolRenderingMode(.hierarchical)
-                    .foregroundColor(appState.isRecording ? .red : .primary)
+                    .foregroundColor(appState.isRecording || appState.isCallRecording ? .red : .primary)
             }
         }
         .menuBarExtraStyle(.window)

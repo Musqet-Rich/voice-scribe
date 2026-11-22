@@ -2,50 +2,52 @@ import AppKit
 import CoreGraphics
 import Foundation
 
-/// Handles pasting text at the cursor position via clipboard + simulated ⌘V
+/// Pastes text at the cursor via the clipboard + simulated ⌘V, then restores
+/// the clipboard exactly as it was (all items and types, not just plain text).
 final class PasteManager {
-    /// Paste text at the current cursor position
-    /// Saves and restores the previous clipboard content
     func paste(_ text: String) {
         let pasteboard = NSPasteboard.general
+        let saved = snapshot(pasteboard)
 
-        // Save current clipboard content
-        let previousContents = pasteboard.string(forType: .string)
-
-        // Set our text with trailing space for natural continuation
         pasteboard.clearContents()
         pasteboard.setString(text + " ", forType: .string)
+        let ourChangeCount = pasteboard.changeCount
 
-        // Small delay to ensure pasteboard is ready
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
             self.simulatePaste()
 
-            // Restore previous clipboard after a delay
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
-                if let previous = previousContents {
-                    pasteboard.clearContents()
-                    pasteboard.setString(previous, forType: .string)
+            // Give the target app time to read the clipboard before restoring it
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                // If something else wrote to the clipboard meanwhile, leave it alone
+                guard pasteboard.changeCount == ourChangeCount else { return }
+                pasteboard.clearContents()
+                if !saved.isEmpty {
+                    pasteboard.writeObjects(saved)
                 }
             }
         }
     }
 
-    /// Simulate ⌘V keystroke using CGEvent
+    private func snapshot(_ pasteboard: NSPasteboard) -> [NSPasteboardItem] {
+        (pasteboard.pasteboardItems ?? []).map { item in
+            let copy = NSPasteboardItem()
+            for type in item.types {
+                if let data = item.data(forType: type) {
+                    copy.setData(data, forType: type)
+                }
+            }
+            return copy
+        }
+    }
+
     private func simulatePaste() {
         let source = CGEventSource(stateID: .hidSystemState)
-
-        // Key code 9 = 'V'
         guard let keyDown = CGEvent(keyboardEventSource: source, virtualKey: 9, keyDown: true),
               let keyUp = CGEvent(keyboardEventSource: source, virtualKey: 9, keyDown: false) else {
-            print("Failed to create CGEvent for paste")
             return
         }
-
-        // Add Command modifier
         keyDown.flags = .maskCommand
         keyUp.flags = .maskCommand
-
-        // Post the events
         keyDown.post(tap: .cghidEventTap)
         keyUp.post(tap: .cghidEventTap)
     }

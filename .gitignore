@@ -1,0 +1,9 @@
+.build/
+.swiftpm/
+*.xcodeproj/
+xcuserdata/
+DerivedData/
+.DS_Store
+# Never commit signing material
+*.p12
+*.pem

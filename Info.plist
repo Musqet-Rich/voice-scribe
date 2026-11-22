@@ -6,6 +6,20 @@
     <string>AppIcon</string>
     <key>LSUIElement</key>
     <false/>
+    <key>CFBundleIdentifier</key>
+    <string>com.monomi.voice-scribe</string>
+    <key>CFBundleName</key>
+    <string>Voice Scribe</string>
+    <key>CFBundleExecutable</key>
+    <string>VoiceScribe</string>
+    <key>CFBundlePackageType</key>
+    <string>APPL</string>
+    <key>CFBundleShortVersionString</key>
+    <string>2.0</string>
+    <key>LSMinimumSystemVersion</key>
+    <string>15.0</string>
+    <key>NSAudioCaptureUsageDescription</key>
+    <string>Voice Scribe records the other side of your calls so it can transcribe them on this Mac.</string>
     <key>NSMicrophoneUsageDescription</key>
     <string>Voice Scribe needs microphone access to record your speech for transcription.</string>
 </dict>

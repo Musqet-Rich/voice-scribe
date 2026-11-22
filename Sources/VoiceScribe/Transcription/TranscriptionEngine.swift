@@ -1,93 +1,86 @@
+import FluidAudio
 import Foundation
-import WhisperKit
 
-/// Wraps WhisperKit for local speech-to-text transcription
+/// Speech models available through FluidAudio (all Parakeet-family, run on the Neural Engine)
+enum SpeechModel: String, CaseIterable, Identifiable {
+    case bark3Clean
+    case bark3
+    case ultra
+    case v2
+
+    var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .bark3Clean: return "Bark 3.0 Clean (English, drops fillers) ~410MB"
+        case .bark3: return "Bark 3.0 (English, verbatim) ~400MB"
+        case .ultra: return "Parakeet Ultra (25 languages) ~600MB"
+        case .v2: return "Parakeet v2 (English) ~600MB"
+        }
+    }
+
+    var version: AsrModelVersion {
+        switch self {
+        case .bark3Clean: return .bark3Clean
+        case .bark3: return .bark3
+        case .ultra: return .ultra
+        case .v2: return .v2
+        }
+    }
+}
+
+/// Timed text returned by the engine
+struct TimedText {
+    let text: String
+    let start: TimeInterval
+    let end: TimeInterval
+}
+
+/// Wraps FluidAudio's Parakeet ASR. The model stays loaded in memory between dictations.
 final class TranscriptionEngine {
-    private var whisperKit: WhisperKit?
+    static let sampleRate = 16_000
 
-    /// Download the specified model with progress updates
-    func downloadModel(
-        model: WhisperModel,
-        modelDir: URL,
-        onProgress: @escaping (Double) -> Void
-    ) async throws {
-        try FileManager.default.createDirectory(at: modelDir, withIntermediateDirectories: true)
+    private var asr: AsrManager?
+    private(set) var loadedModel: SpeechModel?
 
-        let config = WhisperKitConfig(
-            model: model.rawValue,
-            downloadBase: modelDir,
-            verbose: false,
-            prewarm: true
+    var isReady: Bool { asr != nil }
+
+    func isDownloaded(_ model: SpeechModel) -> Bool {
+        AsrModels.modelsExist(
+            at: AsrModels.defaultCacheDirectory(for: model.version),
+            version: model.version
         )
-
-        // WhisperKit downloads and loads the model on init
-        let kit = try await WhisperKit(config)
-
-        // Note: WhisperKit doesn't expose granular download progress via its public API.
-        // The model downloads during init. For a more granular progress UI, you'd need
-        // to monitor the modelDir for file changes. For now, we go from 0 → 1.
-        onProgress(1.0)
-
-        self.whisperKit = kit
     }
 
-    /// Transcribe an audio file and return the text
-    func transcribe(audioURL: URL) async throws -> String {
-        guard let kit = whisperKit else {
-            throw TranscriptionError.modelNotLoaded
+    /// Download (if needed) and load a model, then warm it up so the first dictation is fast
+    func load(_ model: SpeechModel, onProgress: @escaping @Sendable (Double) -> Void) async throws {
+        let models = try await AsrModels.downloadAndLoad(version: model.version) { progress in
+            onProgress(progress.fractionCompleted)
         }
+        let manager = AsrManager(config: .default)
+        try await manager.loadModels(models)
+        asr = manager
+        loadedModel = model
 
-        let results = try await kit.transcribe(audioPath: audioURL.path)
-        let text = results.map { $0.text }.joined(separator: " ").trimmingCharacters(in: .whitespacesAndNewlines)
-
-        if text.isEmpty {
-            throw TranscriptionError.emptyResult
-        }
-
-        return text
+        // Warm-up pass: compiles/caches the ANE graph
+        _ = try? await transcribe(samples: [Float](repeating: 0, count: Self.sampleRate))
     }
 
-    /// Try to load an already-downloaded model (no download, just init)
-    func loadExistingModel(model: WhisperModel, modelDir: URL) async throws {
-        // WhisperKit stores models at: downloadBase/models/argmaxinc/whisperkit-coreml/{model}/
-        let modelFolder = modelDir
-            .appendingPathComponent("models")
-            .appendingPathComponent("argmaxinc")
-            .appendingPathComponent("whisperkit-coreml")
-            .appendingPathComponent(model.rawValue)
-
-        print("[VoiceScribe] Looking for model at: \(modelFolder.path)")
-        print("[VoiceScribe] Exists: \(FileManager.default.fileExists(atPath: modelFolder.path))")
-
-        // List what's actually in the models dir for debugging
-        if let contents = try? FileManager.default.contentsOfDirectory(atPath: modelDir.path) {
-            print("[VoiceScribe] Contents of \(modelDir.path): \(contents)")
-        }
-        if let contents = try? FileManager.default.contentsOfDirectory(atPath: modelFolder.path) {
-            print("[VoiceScribe] Model folder contents: \(contents)")
-        }
-
-        guard FileManager.default.fileExists(atPath: modelFolder.path) else {
-            print("[VoiceScribe] Model folder not found, falling back to notDownloaded")
-            throw TranscriptionError.modelNotLoaded
-        }
-
-        print("[VoiceScribe] Loading model from \(modelFolder.path)...")
-        let config = WhisperKitConfig(
-            modelFolder: modelFolder.path,
-            tokenizerFolder: modelDir,
-            verbose: true,
-            prewarm: true,
-            load: true,
-            download: false
-        )
-        self.whisperKit = try await WhisperKit(config)
-        print("[VoiceScribe] Model loaded successfully!")
+    /// Transcribe 16kHz mono samples
+    func transcribe(samples: [Float]) async throws -> String {
+        try await transcribeDetailed(samples: samples).text
+            .trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
-    /// Check if a model is loaded and ready
-    var isReady: Bool {
-        whisperKit != nil
+    func transcribeDetailed(samples: [Float]) async throws -> ASRResult {
+        guard let asr else { throw TranscriptionError.modelNotLoaded }
+        var padded = samples
+        // Very short clips can fail the encoder; pad to one second of silence
+        if padded.count < Self.sampleRate {
+            padded.append(contentsOf: [Float](repeating: 0, count: Self.sampleRate - padded.count))
+        }
+        var state = TdtDecoderState.make(decoderLayers: await asr.decoderLayerCount)
+        return try await asr.transcribe(padded, decoderState: &state)
     }
 }
 
@@ -98,7 +91,7 @@ enum TranscriptionError: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .modelNotLoaded:
-            return "Whisper model is not loaded. Please download a model first."
+            return "Speech model is not loaded."
         case .emptyResult:
             return "No speech was detected in the recording."
         }

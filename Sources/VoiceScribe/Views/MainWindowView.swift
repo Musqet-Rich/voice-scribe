@@ -20,6 +20,12 @@ struct MainWindowView: View {
                         }
                         .tag("corrections")
 
+                    CallsView(appState: appState)
+                        .tabItem {
+                            Label("Calls", systemImage: "phone")
+                        }
+                        .tag("calls")
+
                     HistoryWindowContent(appState: appState)
                         .tabItem {
                             Label("History", systemImage: "clock")

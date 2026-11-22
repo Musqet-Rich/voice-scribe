@@ -1,33 +1,41 @@
 #!/bin/bash
-# Build and run VoiceScribe as a proper .app bundle
+# Build VoiceScribe, install it to ~/Applications/Voice Scribe.app and launch it
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 cd "$SCRIPT_DIR"
 
 echo "Building..."
-swift build -c release 2>&1
+swift build -c release
 
-APP_DIR=".build/VoiceScribe.app"
+APP_DIR="$HOME/Applications/Voice Scribe.app"
 CONTENTS="$APP_DIR/Contents"
-MACOS="$CONTENTS/MacOS"
 
-# Create .app bundle structure
+pkill -x VoiceScribe 2>/dev/null || true
+
 rm -rf "$APP_DIR"
-mkdir -p "$MACOS"
-cp .build/release/VoiceScribe "$MACOS/VoiceScribe"
+mkdir -p "$CONTENTS/MacOS" "$CONTENTS/Resources"
+cp .build/release/VoiceScribe "$CONTENTS/MacOS/VoiceScribe"
 cp Info.plist "$CONTENTS/Info.plist"
 
-# Build .icns from iconset (macOS only)
-RESOURCES="$CONTENTS/Resources"
-mkdir -p "$RESOURCES"
+# SwiftPM resource bundles (FluidAudio) must sit next to the executable
+for bundle in .build/release/*.bundle; do
+    [ -e "$bundle" ] && cp -R "$bundle" "$CONTENTS/Resources/"
+done
+
 if [ -d "VoiceScribe.iconset" ]; then
-    iconutil -c icns -o "$RESOURCES/AppIcon.icns" VoiceScribe.iconset 2>/dev/null || true
+    iconutil -c icns -o "$CONTENTS/Resources/AppIcon.icns" VoiceScribe.iconset 2>/dev/null || true
 fi
 
-if [ -f VoiceScribe.entitlements ]; then
-    codesign --force --sign - --entitlements VoiceScribe.entitlements "$MACOS/VoiceScribe" 2>/dev/null || true
+# Sign with a stable local identity if present, so macOS keeps the Accessibility
+# permission across rebuilds. Falls back to ad-hoc (permission must be re-granted each build).
+IDENTITY="Voice Scribe Local Signing"
+if security find-identity -v -p codesigning | grep -q "$IDENTITY"; then
+    codesign --force --deep --sign "$IDENTITY" --entitlements VoiceScribe.entitlements "$APP_DIR"
+else
+    echo "warning: '$IDENTITY' not found or not trusted; using ad-hoc signing"
+    codesign --force --deep --sign - --entitlements VoiceScribe.entitlements "$APP_DIR"
 fi
 
-echo "Launching VoiceScribe.app..."
+echo "Launching $APP_DIR"
 open "$APP_DIR"

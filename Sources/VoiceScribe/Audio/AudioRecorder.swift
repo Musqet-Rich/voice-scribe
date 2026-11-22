@@ -1,106 +1,86 @@
 import AVFoundation
 import Foundation
 
-/// Records microphone audio to a temporary WAV file using AVAudioEngine
+/// Records microphone audio into memory as 16kHz mono Float samples
 final class AudioRecorder {
     private var audioEngine: AVAudioEngine?
-    private var audioFile: AVAudioFile?
-    private var tempFileURL: URL?
+    private var samples: [Float] = []
+    private let lock = NSLock()
 
-    /// Start recording from the microphone
-    func startRecording() {
-        // Request microphone permission if needed
+    static func requestPermission() async -> Bool {
         switch AVCaptureDevice.authorizationStatus(for: .audio) {
-        case .authorized:
-            break
-        case .notDetermined:
-            AVCaptureDevice.requestAccess(for: .audio) { granted in
-                if granted {
-                    Task { @MainActor in self.startRecording() }
-                }
-            }
-            return
-        default:
-            print("Microphone access denied")
-            return
-        }
-
-        let engine = AVAudioEngine()
-        let inputNode = engine.inputNode
-        let inputFormat = inputNode.outputFormat(forBus: 0)
-
-        // Target format: 16kHz mono (what WhisperKit expects)
-        guard let targetFormat = AVAudioFormat(
-            commonFormat: .pcmFormatFloat32,
-            sampleRate: 16000,
-            channels: 1,
-            interleaved: false
-        ) else {
-            print("Failed to create target audio format")
-            return
-        }
-
-        // Create temp file
-        let tempDir = FileManager.default.temporaryDirectory
-        let tempFile = tempDir.appendingPathComponent(UUID().uuidString + ".wav")
-        self.tempFileURL = tempFile
-
-        do {
-            audioFile = try AVAudioFile(
-                forWriting: tempFile,
-                settings: targetFormat.settings
-            )
-        } catch {
-            print("Failed to create audio file: \(error)")
-            return
-        }
-
-        // Install tap with format conversion
-        guard let converter = AVAudioConverter(from: inputFormat, to: targetFormat) else {
-            print("Failed to create audio converter")
-            return
-        }
-
-        inputNode.installTap(onBus: 0, bufferSize: 4096, format: inputFormat) { [weak self] buffer, _ in
-            guard let self = self, let audioFile = self.audioFile else { return }
-
-            let frameCount = AVAudioFrameCount(
-                Double(buffer.frameLength) * targetFormat.sampleRate / inputFormat.sampleRate
-            )
-            guard let convertedBuffer = AVAudioPCMBuffer(
-                pcmFormat: targetFormat,
-                frameCapacity: frameCount
-            ) else { return }
-
-            var error: NSError?
-            converter.convert(to: convertedBuffer, error: &error) { _, outStatus in
-                outStatus.pointee = .haveData
-                return buffer
-            }
-
-            if error == nil {
-                do {
-                    try audioFile.write(from: convertedBuffer)
-                } catch {
-                    print("Failed to write audio buffer: \(error)")
-                }
-            }
-        }
-
-        do {
-            try engine.start()
-            self.audioEngine = engine
-        } catch {
-            print("Failed to start audio engine: \(error)")
+        case .authorized: return true
+        case .notDetermined: return await AVCaptureDevice.requestAccess(for: .audio)
+        default: return false
         }
     }
 
-    /// Stop recording and return the URL of the recorded audio file
-    func stopRecording() -> URL? {
+    /// Start recording from the default input device
+    func startRecording(deviceUID: String? = nil) throws {
+        guard AVCaptureDevice.authorizationStatus(for: .audio) == .authorized else {
+            throw RecorderError.permissionDenied
+        }
+
+        lock.withLock { samples.removeAll(keepingCapacity: true) }
+
+        let engine = AVAudioEngine()
+        InputDevices.apply(uid: deviceUID, to: engine)
+        let inputNode = engine.inputNode
+        let inputFormat = inputNode.outputFormat(forBus: 0)
+
+        guard let targetFormat = AVAudioFormat(
+            commonFormat: .pcmFormatFloat32, sampleRate: 16_000, channels: 1, interleaved: false
+        ), let converter = AVAudioConverter(from: inputFormat, to: targetFormat) else {
+            throw RecorderError.formatUnavailable
+        }
+        // Stereo receivers (e.g. DJI Mic with one transmitter per channel): mix down rather than drop channel 2
+        converter.downmix = true
+
+        inputNode.installTap(onBus: 0, bufferSize: 4096, format: inputFormat) { [weak self] buffer, _ in
+            guard let self else { return }
+            let capacity = AVAudioFrameCount(
+                Double(buffer.frameLength) * targetFormat.sampleRate / inputFormat.sampleRate
+            ) + 32
+            guard let out = AVAudioPCMBuffer(pcmFormat: targetFormat, frameCapacity: capacity) else { return }
+
+            var supplied = false
+            var error: NSError?
+            converter.convert(to: out, error: &error) { _, status in
+                if supplied {
+                    status.pointee = .noDataNow
+                    return nil
+                }
+                supplied = true
+                status.pointee = .haveData
+                return buffer
+            }
+            guard error == nil, let channel = out.floatChannelData?[0] else { return }
+            let chunk = Array(UnsafeBufferPointer(start: channel, count: Int(out.frameLength)))
+            self.lock.withLock { self.samples.append(contentsOf: chunk) }
+        }
+
+        engine.prepare()
+        try engine.start()
+        audioEngine = engine
+    }
+
+    /// Stop recording and return the captured samples
+    func stopRecording() -> [Float] {
         audioEngine?.inputNode.removeTap(onBus: 0)
         audioEngine?.stop()
         audioEngine = nil
-        audioFile = nil
-        return tempFileURL
+        return lock.withLock { samples }
+    }
+}
+
+enum RecorderError: LocalizedError {
+    case permissionDenied
+    case formatUnavailable
+
+    var errorDescription: String? {
+        switch self {
+        case .permissionDenied: return "Microphone access denied. Enable it in System Settings → Privacy & Security → Microphone."
+        case .formatUnavailable: return "Could not set up the audio format."
+        }
     }
 }

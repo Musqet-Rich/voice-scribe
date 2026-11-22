@@ -21,7 +21,7 @@ struct DownloadView: View {
 
             // Model picker
             Picker("Model", selection: $appState.selectedModel) {
-                ForEach(WhisperModel.allCases) { model in
+                ForEach(SpeechModel.allCases) { model in
                     Text(model.displayName).tag(model)
                 }
             }
